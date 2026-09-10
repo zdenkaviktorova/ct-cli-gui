@@ -12,8 +12,9 @@ This project bypasses recent site API changes (which break standard extractors) 
 * **Automatic Subtitles:** Downloads official Czech closed captions, silently converts them from web `.vtt` to standard `.srt`, and soft-embeds them directly into the `.mp4` file (while keeping the external `.srt` file for media servers).
 * **Artwork Fetching:** Scrapes and saves the official high-resolution episode poster as a `.jpg`.
 * **Quality Selection:** Choose your maximum resolution limit (1080p, 720p, 540p, 360p) to save hard drive space.
-* **Subtitle and Transcript Downloads:** Download only the available subtitles or transcript without downloading the video.
+* **Subtitle and Transcript Downloads:** Download only the available subtitles without downloading the video. Subtitles can be saved as `.srt`, plain-text `.txt`, or both.
 * **Two Interfaces:** Includes a desktop GUI and command-line wrappers for Windows, Linux, and macOS.
+* **Standalone Binaries:** Self-contained executables for Linux, macOS, and Windows (AMD64 and ARM64) that bundle Python, yt-dlp, and ffmpeg — no installation required.
 
 ## 🛠️ Prerequisites
 
@@ -161,13 +162,69 @@ builds the wheel and source distribution and publishes them to PyPI using
 trusted publishing. Configure a PyPI project named `ct-cli-gui` and a
 repository publishing environment named `pypi` before the first release.
 
+## 🔧 Standalone binaries (no Python required)
+
+Self-contained executables that bundle Python, yt-dlp, and ffmpeg are available
+from the [GitHub Releases](../../releases) page. Download the binary for your
+platform and run it directly — no installation needed.
+
+| Platform | CLI binary | GUI binary |
+|---|---|---|
+| Linux AMD64 | `ct-dlp-linux-amd64` | `ct-gui-linux-amd64` |
+| Linux ARM64 | `ct-dlp-linux-arm64` | `ct-gui-linux-arm64` |
+| macOS Apple Silicon | `ct-dlp-macos-arm64` | `ct-gui-macos-arm64` |
+| Windows AMD64 | `ct-dlp-windows-amd64.exe` | `ct-gui-windows-amd64.exe` |
+
+> **Note:** macOS Intel (x86_64) binaries are not available — GitHub-hosted
+> Intel-Mac runners are unavailable. Intel Mac users can install via PyPI
+> (`pip install ct-cli-gui`) or run from source; the Apple Silicon binary
+> also works on Intel Macs via Rosetta 2.
+>
+> Binaries are unsigned and may trigger Gatekeeper (macOS) or SmartScreen
+> (Windows) warnings on first run. On macOS, right-click → **Open**. On
+> Windows, click **More info** → **Run anyway**.
+
 ## 💻 Usage
 
-### Option 1: The Desktop GUI
-Start `ct_gui.pyw` using the command for your operating system. Paste an episode or series URL from iVysílání, select a maximum quality and download type (`video`, `subtitles`, or `transcript`), and click **Download**. The GUI launches the downloader in a new terminal where supported.
+There are three ways to use this project. All three are fully supported:
 
-### Option 2: The Command Line (CLI)
-Open a terminal in your target download folder and use the wrapper for your operating system:
+### Option 1: Run from source (local Python interpreter)
+
+Clone the repository, install runtime dependencies (`requirements.txt`), and
+ensure `yt-dlp` and `ffmpeg` are on your `PATH`:
+
+```sh
+python ct_gui.pyw            # Desktop GUI
+python ct_downloader.py URL  # CLI directly
+```
+
+The desktop GUI lets you paste **multiple URLs** (newline-, comma-, or
+space-separated), choose a **destination folder**, pick quality / mode /
+subtitle format, and toggle **series/season folder organization**.
+
+Shell wrappers are provided for convenience:
+
+```sh
+./ct-dlp URL       # Linux/macOS — thin sh wrapper that calls python ct_downloader.py
+ct-dlp.bat URL     # Windows — thin batch wrapper
+```
+
+> **Note:** `ct-dlp` and `ct-dlp.bat` are shell launcher scripts, not Python
+> files. Invoke them directly (not via `python`).
+
+### Option 2: Install from PyPI
+
+```sh
+pip install ct-cli-gui
+ct-dlp URL
+```
+
+Provides the `ct-dlp` command. Requires `ffmpeg` on `PATH`.
+
+### Option 3: Standalone binaries
+
+Download from the [Releases](../../releases) page and run directly — no
+Python, yt-dlp, or ffmpeg installation required (all bundled).
 
 **Download a single episode:**
 ```text
@@ -178,21 +235,54 @@ ct-dlp.bat "https://www.ceskatelevize.cz/porady/11248773911-habsburkove/21556226
 ct-dlp "https://www.ceskatelevize.cz/porady/11248773911-habsburkove/215562260670001/"
 ```
 
-**Download only subtitles or a transcript:**
+**Download only subtitles:**
 ```text
 ct-dlp --mode subtitles "https://www.ceskatelevize.cz/porady/..."
-ct-dlp --mode transcript "https://www.ceskatelevize.cz/porady/..."
+ct-dlp --subtitles-only "https://www.ceskatelevize.cz/porady/..."
+ct-dlp --mode subtitles --subtitle-format txt "https://www.ceskatelevize.cz/porady/..."
+ct-dlp --mode subtitles --subtitle-format both "https://www.ceskatelevize.cz/porady/..."
 ```
 
-The equivalent aliases `--subtitles-only` and `--transcript-only` are also
-available. These options work for both episode and series URLs and skip media
-and poster downloads.
+The `--subtitles-only` alias is also available. These options work for both
+episode and series URLs and skip media and poster downloads.
 
-Subtitle-only downloads create a standard `.cs.srt` file when the episode
-provides captions. Transcript-only downloads create a `.txt` file when the
-episode provides transcript text. If the requested resource is unavailable,
-the downloader reports that episode and continues processing the remaining
-episodes in a series.
+The `--subtitle-format` flag controls which subtitle files are saved. It now
+applies to **video downloads too** (not only subtitles-only mode):
+
+| Mode | `--subtitle-format` | `.mp4` (embedded) | external `.srt` | external `.txt` |
+|---|---|---|---|---|
+| video | `srt` (default) | ✅ | ✅ | ❌ |
+| video | `srt,txt` / `both` | ✅ | ✅ | ✅ |
+| video | `txt` | ✅ | ❌ | ✅ |
+| subtitles | `srt` | — | ✅ | ❌ |
+| subtitles | `srt,txt` / `both` | — | ✅ | ✅ |
+| subtitles | `txt` | — | ❌ | ✅ |
+
+If subtitles are unavailable, the downloader reports that episode and
+continues processing the remaining episodes in a series.
+
+**Choose an output directory:**
+```text
+ct-dlp -o "/path/to/downloads" "https://www.ceskatelevize.cz/porady/..."
+ct-dlp --output-dir "/path/to/downloads" "https://www.ceskatelevize.cz/porady/..."
+```
+If no output directory is given, files are saved to the current working
+directory.
+
+**Organize into series/season folders:**
+```text
+ct-dlp --series-folders "https://www.ceskatelevize.cz/porady/..."
+```
+When enabled, files are placed in `<Series>/Season 1/<file>` subfolders
+(default: OFF). Note: Česká televize titles do not expose a season number, so
+the season folder is always `Season 1`.
+
+**Download multiple URLs at once:**
+```text
+ct-dlp URL1 URL2 URL3
+```
+Each URL (episode or series) is processed in turn. Combined with
+`--series-folders`, this keeps downloads from multiple shows organized.
 
 **Download a series:**
 
@@ -219,29 +309,35 @@ python3 -m pytest --cov=ct_downloader --cov=ct_gui --cov-branch --cov-report=ter
 
 The tests use mocked network, terminal, and subprocess calls, so they do not
 contact Česká televize or download media files. Coverage includes both the
-video workflow and the subtitle/transcript-only workflows, including episode
-and series dispatch. The GitHub Actions workflow runs linting, formatting,
+video workflow and the subtitle-only workflows, including episode and series
+dispatch. The GitHub Actions workflow runs linting, formatting,
 compilation, and branch-coverage checks on Windows, Linux, and macOS.
 
 ## 📤 Publishing a release
 
-The `package.yml` workflow builds and smoke-tests the package whenever a
-version tag is pushed. To publish a new version:
+Releases are created **automatically** when the `version` field in
+`pyproject.toml` is updated and merged to `main`:
 
 1. Update `version` in `pyproject.toml`.
 2. Commit and merge the change into `main`.
-3. Configure a PyPI Trusted Publisher for this repository, using the `pypi`
-   environment and `.github/workflows/package.yml` workflow.
-4. Create and push a matching tag:
-   ```sh
-   git tag v1.0.1
-   git push origin v1.0.1
-   ```
-5. Install the published release:
-   ```sh
-   python -m pip install --upgrade ct-cli-gui
-   ct-dlp --help
-   ```
+3. The `auto-release.yml` workflow detects the new version, creates a git tag
+   (`v<version>`), and creates a GitHub Release with auto-generated notes.
+4. The tag push triggers:
+   - `binaries.yml` — builds self-contained CLI and GUI executables for
+     Linux, macOS, and Windows (AMD64 + ARM64) and attaches them to the
+     Release.
+   - `package.yml` — builds and publishes the Python package to PyPI via
+     Trusted Publishing.
+
+Dependabot keeps dependencies current. When a Dependabot PR passes CI it is
+auto-merged, the patch version is bumped, and the cycle above repeats — so
+updated binaries are released automatically whenever dependencies change.
+
+To install a published release:
+```sh
+python -m pip install --upgrade ct-cli-gui
+ct-dlp --version
+```
 
 The workflow publishes through PyPI Trusted Publishing and does not store a
 PyPI API token in the repository.

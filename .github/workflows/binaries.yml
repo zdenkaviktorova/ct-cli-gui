@@ -1,0 +1,171 @@
+name: Build standalone binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            arch: amd64
+            artifact_suffix: linux-amd64
+          - os: ubuntu-22.04-arm
+            arch: arm64
+            artifact_suffix: linux-arm64
+          - os: macos-14
+            arch: arm64
+            artifact_suffix: macos-arm64
+          - os: windows-latest
+            arch: amd64
+            artifact_suffix: windows-amd64
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install build dependencies
+        run: python -m pip install --upgrade -r requirements-build.txt
+
+      - name: Download static ffmpeg (Linux AMD64)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          curl -L "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz" -o ffmpeg.tar.xz
+          tar xf ffmpeg.tar.xz
+          cp */bin/ffmpeg ./ffmpeg
+          chmod +x ffmpeg
+
+      - name: Download static ffmpeg (Linux ARM64)
+        if: matrix.os == 'ubuntu-22.04-arm'
+        run: |
+          curl -L "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linuxarm64-gpl.tar.xz" -o ffmpeg.tar.xz
+          tar xf ffmpeg.tar.xz
+          cp */bin/ffmpeg ./ffmpeg
+          chmod +x ffmpeg
+
+      - name: Get ffmpeg via Homebrew (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          brew install --quiet ffmpeg
+          cp "$(which ffmpeg)" ./ffmpeg
+          chmod +x ffmpeg
+
+      - name: Download static ffmpeg (Windows)
+        if: startsWith(matrix.os, 'windows')
+        shell: pwsh
+        run: |
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
+          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg_out
+          $exe = Get-ChildItem -Recurse -Path ffmpeg_out -Filter ffmpeg.exe | Select-Object -First 1
+          Copy-Item $exe.FullName -Destination ffmpeg.exe
+
+      - name: Set ffmpeg binary name
+        id: ffmpeg
+        shell: bash
+        run: |
+          if [[ "${{ matrix.os }}" == windows-* ]]; then
+            echo "bin=ffmpeg.exe" >> "$GITHUB_OUTPUT"
+            echo "sep=;" >> "$GITHUB_OUTPUT"
+          else
+            echo "bin=ffmpeg" >> "$GITHUB_OUTPUT"
+            echo "sep=:" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build CLI binary
+        shell: bash
+        run: >
+          pyinstaller --onefile --name ct-dlp
+          --collect-all yt_dlp
+          --add-binary "${{ steps.ffmpeg.outputs.bin }}${{ steps.ffmpeg.outputs.sep }}."
+          ct_downloader.py
+
+      - name: Build GUI binary
+        shell: bash
+        run: >
+          pyinstaller --onefile --windowed --name ct-gui
+          --collect-all yt_dlp
+          --hidden-import ct_downloader
+          --add-data "ct_downloader.py${{ steps.ffmpeg.outputs.sep }}."
+          --add-binary "${{ steps.ffmpeg.outputs.bin }}${{ steps.ffmpeg.outputs.sep }}."
+          ct_gui.pyw
+
+      - name: Smoke-test CLI binary (Unix)
+        if: "!startsWith(matrix.os, 'windows')"
+        run: |
+          ./dist/ct-dlp --version
+          ./dist/ct-dlp --help
+
+      - name: Smoke-test CLI binary (Windows)
+        if: startsWith(matrix.os, 'windows')
+        shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+        run: |
+          .\dist\ct-dlp.exe --version
+          .\dist\ct-dlp.exe --help
+
+      - name: Rename artifacts with platform suffix (Unix)
+        if: "!startsWith(matrix.os, 'windows')"
+        run: |
+          mv dist/ct-dlp "dist/ct-dlp-${{ matrix.artifact_suffix }}"
+          mv dist/ct-gui "dist/ct-gui-${{ matrix.artifact_suffix }}"
+
+      - name: Rename artifacts with platform suffix (Windows)
+        if: startsWith(matrix.os, 'windows')
+        shell: pwsh
+        run: |
+          Move-Item dist\ct-dlp.exe "dist\ct-dlp-${{ matrix.artifact_suffix }}.exe"
+          Move-Item dist\ct-gui.exe "dist\ct-gui-${{ matrix.artifact_suffix }}.exe"
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ct-dlp-${{ matrix.artifact_suffix }}
+          path: dist/ct-dlp-*
+
+      - name: Upload GUI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ct-gui-${{ matrix.artifact_suffix }}
+          path: dist/ct-gui-*
+
+  release:
+    if: >
+      always() &&
+      (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'release') &&
+      contains(needs.build.result, 'success')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          merge-multiple: true
+
+      - name: List artifacts
+        run: find artifacts/ -type f | sort
+
+      - name: Attach binaries to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
